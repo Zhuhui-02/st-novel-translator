@@ -30,7 +30,7 @@ After this project is pushed to GitHub, install it directly inside SillyTavern:
 4. Paste the repository URL:
 
 ```text
-https://github.com/liuzhenghan/st-novel-translator
+https://github.com/Zhuhui-02/st-novel-translator
 ```
 
 SillyTavern will clone the repository into its third-party extension folder.

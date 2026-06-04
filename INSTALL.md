@@ -5,7 +5,7 @@
 Use this URL in SillyTavern's extension installer:
 
 ```text
-https://github.com/liuzhenghan/st-novel-translator
+https://github.com/Zhuhui-02/st-novel-translator
 ```
 
 The repository must be public or accessible to the SillyTavern runtime.
