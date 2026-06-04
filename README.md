@@ -19,6 +19,37 @@ browser through `localforage` when available, with `localStorage` as a fallback.
 - Run lightweight local QA checks for empty translations, length drift, and
   terminology consistency.
 - Export and import project JSON.
+- Use the standalone Chinese workspace in `standalone/` for TXT/EPUB import and
+  JSON/TXT/HTML export.
+- Optionally run the local scraper service for URL import experiments.
+
+## Standalone Chinese Workspace
+
+Open `standalone/index.html` from a local static server or publish the repository
+through GitHub Pages. The page supports:
+
+- TXT and Markdown-like text import.
+- EPUB import through browser-side JSZip.
+- Chapter and segment navigation.
+- Translation editing.
+- Glossary and name tables.
+- Prompt generation and local QA.
+- JSON, TXT, and bilingual HTML export.
+
+For URL import, the page first tries browser fetch. If the site blocks cross-site
+requests, run the local helper:
+
+```text
+npm run scraper
+```
+
+Then try the URL again. The helper exposes:
+
+```text
+http://localhost:8787/api/fetch?url=https%3A%2F%2Fkakuyomu.jp%2F...
+```
+
+Use site scraping carefully and only for content you have permission to process.
 
 ## Install From SillyTavern
 
