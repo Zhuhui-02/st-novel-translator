@@ -1,0 +1,124 @@
+.novel-translator-extension {
+  margin: 12px 0;
+}
+
+.novel-translator-body {
+  padding: 10px;
+}
+
+.novel-translator-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(220px, 0.9fr) minmax(280px, 1.2fr) minmax(260px, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.novel-translator-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.novel-translator-row,
+.novel-translator-actions,
+.novel-translator-split-header,
+.novel-translator-tabs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.novel-translator-split-header {
+  justify-content: space-between;
+}
+
+.novel-translator-progress {
+  opacity: 0.75;
+  font-size: 0.9em;
+}
+
+.novel-translator-chapters,
+.novel-translator-segments,
+.novel-translator-table,
+.novel-translator-qa {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.novel-translator-chapter,
+.novel-translator-segment {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 6px;
+  background: var(--SmartThemeBlurTintColor);
+  color: var(--SmartThemeBodyColor);
+  text-align: left;
+  cursor: pointer;
+}
+
+.novel-translator-chapter span,
+.novel-translator-segment span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-translator-chapter.active,
+.novel-translator-segment.active,
+.novel-translator-tabs .active {
+  outline: 2px solid var(--SmartThemeQuoteColor);
+}
+
+.novel-translator-memory-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 0.8fr;
+  gap: 6px;
+}
+
+.novel-translator-qa-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 6px;
+}
+
+.novel-translator-qa-item.severity-high {
+  border-color: #c94b4b;
+}
+
+.novel-translator-qa-item.severity-medium {
+  border-color: #c99a4b;
+}
+
+.novel-translator-empty {
+  opacity: 0.75;
+  padding: 8px;
+}
+
+@media (max-width: 1180px) {
+  .novel-translator-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .novel-translator-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .novel-translator-memory-row {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "st-novel-translator",
+  "version": "0.1.0",
+  "description": "A SillyTavern UI extension for long-form novel translation projects.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "check": "node --check index.js && node --check src/state.js && node --check src/segmenter.js && node --check src/prompt-builder.js && node --check src/qa.js && node --check src/storage.js"
+  }
+}
