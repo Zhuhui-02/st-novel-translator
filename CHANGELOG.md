@@ -8,3 +8,6 @@
 - Added glossary, name table, style rules, prompt generation, review prompt
   generation, QA checks, and JSON import/export.
 - Added browser-local persistence with `localforage` fallback handling.
+- Replaced the standalone page experiment with an embedded SillyTavern workspace
+  opened from a plugin button.
+- Added TXT/EPUB import and JSON/TXT/HTML export in the embedded workspace.

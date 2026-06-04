@@ -5,6 +5,7 @@ import { splitNovelText } from './src/segmenter.js';
 import { buildReviewPrompt, buildTranslationPrompt } from './src/prompt-builder.js';
 import { runProjectQa } from './src/qa.js';
 import { loadState, saveState } from './src/storage.js';
+import { htmlToText, readEpubFile } from './src/epub.js';
 
 const EXTENSION_NAME = 'st-novel-translator';
 const SETTINGS_KEY = 'novelTranslator';
@@ -13,6 +14,9 @@ let state = createDefaultState();
 let context = null;
 let root = null;
 let saveTimer = null;
+let workspaceOpen = false;
+let memoryTab = 'glossary';
+let hint = '选择 TXT / EPUB，或粘贴网页地址尝试读取。';
 
 function ensureSettings() {
   extension_settings[SETTINGS_KEY] ??= {
@@ -36,19 +40,27 @@ function dispatch(action) {
   render();
 }
 
-function getTextAreaValue(id) {
-  return root.querySelector(`#${id}`)?.value?.trim() ?? '';
-}
-
-function setTextAreaValue(id, value) {
-  const element = root.querySelector(`#${id}`);
-  if (element) {
-    element.value = value;
+function updateState(action, shouldRender = true) {
+  state = reduceState(state, action);
+  scheduleSave();
+  if (shouldRender) {
+    render();
   }
 }
 
-function escapeHtml(value) {
-  return String(value ?? '')
+function value(id) {
+  return root.querySelector(`#${id}`)?.value?.trim() ?? '';
+}
+
+function setValue(id, nextValue) {
+  const element = root.querySelector(`#${id}`);
+  if (element) {
+    element.value = nextValue;
+  }
+}
+
+function escapeHtml(nextValue) {
+  return String(nextValue ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -79,107 +91,183 @@ function render() {
     return;
   }
 
-  const project = state.project;
-  const activeChapter = selectActiveChapter(state);
-  const activeSegment = selectActiveSegment(state);
-  const chapters = state.chapters;
-  const segments = activeChapter ? state.segments.filter((item) => item.chapterId === activeChapter.id) : [];
-  const completedCount = state.segments.filter((item) => item.status === 'translated' || item.status === 'reviewed').length;
+  const translatedCount = state.segments.filter((item) => item.target.trim()).length;
   const totalCount = state.segments.length;
-  const progress = totalCount ? Math.round((completedCount / totalCount) * 100) : 0;
+  const progress = totalCount ? Math.round((translatedCount / totalCount) * 100) : 0;
 
   root.innerHTML = `
     <div class="inline-drawer">
       <div class="inline-drawer-toggle inline-drawer-header">
-        <b>Novel Translator</b>
-        <div class="novel-translator-progress">${completedCount}/${totalCount} · ${progress}%</div>
+        <b>小说翻译插件</b>
+        <div class="novel-translator-progress">${translatedCount}/${totalCount} · ${progress}%</div>
       </div>
-      <div class="inline-drawer-content novel-translator-body">
-        <div class="novel-translator-grid">
-          <section class="novel-translator-pane novel-translator-project">
-            <label>Project title</label>
-            <input id="nt_project_title" class="text_pole" value="${escapeHtml(project.title)}" placeholder="Untitled novel">
-            <div class="novel-translator-row">
-              <input id="nt_source_lang" class="text_pole" value="${escapeHtml(project.sourceLang)}" placeholder="Source">
-              <input id="nt_target_lang" class="text_pole" value="${escapeHtml(project.targetLang)}" placeholder="Target">
-            </div>
-            <label>Style profile</label>
-            <textarea id="nt_style_profile" class="text_pole textarea_compact" rows="4" placeholder="Tone, register, naming conventions...">${escapeHtml(project.styleProfile)}</textarea>
-            <label>Import text</label>
-            <textarea id="nt_import_text" class="text_pole textarea_compact" rows="7" placeholder="Paste TXT or Markdown novel text here"></textarea>
-            <div class="novel-translator-actions">
-              <button id="nt_save_project" class="menu_button">Save project</button>
-              <button id="nt_import_text_btn" class="menu_button">Import</button>
-              <button id="nt_export_json_btn" class="menu_button">Export JSON</button>
-            </div>
-            <label>Import JSON</label>
-            <textarea id="nt_import_json" class="text_pole textarea_compact" rows="4" placeholder="Paste exported project JSON"></textarea>
-            <button id="nt_import_json_btn" class="menu_button wide100p">Load JSON</button>
-          </section>
-
-          <section class="novel-translator-pane">
-            <div class="novel-translator-split-header">
-              <b>Chapters</b>
-              <button id="nt_run_qa_btn" class="menu_button">Run QA</button>
-            </div>
-            <div class="novel-translator-chapters">
-              ${chapters.map((chapter) => `
-                <button class="novel-translator-chapter ${chapter.id === state.activeChapterId ? 'active' : ''}" data-chapter-id="${chapter.id}">
-                  <span>${escapeHtml(chapter.title)}</span>
-                  <small>${state.segments.filter((item) => item.chapterId === chapter.id && item.target).length}/${state.segments.filter((item) => item.chapterId === chapter.id).length}</small>
-                </button>
-              `).join('')}
-            </div>
-            <div class="novel-translator-segments">
-              ${segments.map((segment) => `
-                <button class="novel-translator-segment ${segment.id === state.activeSegmentId ? 'active' : ''}" data-segment-id="${segment.id}">
-                  <span>${escapeHtml(segment.source.slice(0, 80))}</span>
-                  <small>${escapeHtml(segment.status)}</small>
-                </button>
-              `).join('')}
-            </div>
-          </section>
-
-          <section class="novel-translator-pane novel-translator-editor">
-            <div class="novel-translator-split-header">
-              <b>Segment</b>
-              <span>${activeChapter ? escapeHtml(activeChapter.title) : 'No chapter'}</span>
-            </div>
-            <label>Source</label>
-            <textarea id="nt_segment_source" class="text_pole textarea_compact" rows="8" readonly>${escapeHtml(activeSegment?.source ?? '')}</textarea>
-            <label>Translation</label>
-            <textarea id="nt_segment_target" class="text_pole textarea_compact" rows="8" placeholder="Write or paste the translation here">${escapeHtml(activeSegment?.target ?? '')}</textarea>
-            <label>Translator notes</label>
-            <textarea id="nt_segment_notes" class="text_pole textarea_compact" rows="3" placeholder="Optional notes">${escapeHtml(activeSegment?.notes ?? '')}</textarea>
-            <div class="novel-translator-actions">
-              <button id="nt_save_segment_btn" class="menu_button">Save segment</button>
-              <button id="nt_prompt_btn" class="menu_button">Build prompt</button>
-              <button id="nt_review_prompt_btn" class="menu_button">Review prompt</button>
-            </div>
-            <textarea id="nt_prompt_output" class="text_pole textarea_compact" rows="7" placeholder="Generated prompt"></textarea>
-            <div class="novel-translator-actions">
-              <button id="nt_copy_prompt_btn" class="menu_button">Copy prompt</button>
-              <button id="nt_send_prompt_btn" class="menu_button">Send to chat</button>
-            </div>
-          </section>
-
-          <section class="novel-translator-pane novel-translator-memory">
-            <div class="novel-translator-tabs">
-              <button class="menu_button nt-tab active" data-tab="glossary">Glossary</button>
-              <button class="menu_button nt-tab" data-tab="entities">Names</button>
-              <button class="menu_button nt-tab" data-tab="style">Style</button>
-              <button class="menu_button nt-tab" data-tab="qa">QA</button>
-            </div>
-            <div id="nt_memory_panel">
-              ${renderMemoryPanel('glossary')}
-            </div>
-          </section>
+      <div class="inline-drawer-content novel-translator-launcher">
+        <div>
+          <strong>${escapeHtml(state.project.title)}</strong>
+          <p>在 SillyTavern 内打开小说翻译工作台，管理章节、段落、术语、人名与提示词。</p>
         </div>
+        <button id="nt_open_workspace_btn" class="menu_button">打开小说翻译工作台</button>
       </div>
     </div>
+    ${workspaceOpen ? renderWorkspace() : ''}
   `;
 
   bindEvents();
+}
+
+function renderWorkspace() {
+  const project = state.project;
+  const activeChapter = selectActiveChapter(state);
+  const activeSegment = selectActiveSegment(state);
+  const chapterSegments = activeChapter ? state.segments.filter((item) => item.chapterId === activeChapter.id) : [];
+  const translatedCount = state.segments.filter((item) => item.target.trim()).length;
+
+  return `
+    <div class="nt-workspace-backdrop">
+      <section class="nt-workspace">
+        <header class="nt-workspace-header">
+          <div>
+            <h2>小说翻译工作台</h2>
+            <p>内嵌在 SillyTavern 的项目面板，支持 TXT / EPUB 导入、提示词生成、记忆表和导出。</p>
+          </div>
+          <div class="nt-header-actions">
+            <button id="nt_send_prompt_top_btn" class="menu_button">发送提示词</button>
+            <button id="nt_close_workspace_btn" class="menu_button">关闭</button>
+          </div>
+        </header>
+
+        <div class="nt-workspace-stats">
+          <span><b>${state.chapters.length}</b> 章节</span>
+          <span><b>${state.segments.length}</b> 段落</span>
+          <span><b>${translatedCount}</b> 已译</span>
+          <span><b>${state.qaIssues.length}</b> 检查项</span>
+        </div>
+
+        <div class="nt-workspace-grid">
+          <aside class="nt-side-column">
+            <section class="nt-panel">
+              <h3>项目</h3>
+              <label>书名
+                <input id="nt_project_title" class="text_pole" value="${escapeHtml(project.title)}" placeholder="未命名小说">
+              </label>
+              <div class="novel-translator-row">
+                <label>原文
+                  <input id="nt_source_lang" class="text_pole" value="${escapeHtml(project.sourceLang)}" placeholder="日文">
+                </label>
+                <label>译文
+                  <input id="nt_target_lang" class="text_pole" value="${escapeHtml(project.targetLang)}" placeholder="中文">
+                </label>
+              </div>
+              <label>风格要求
+                <textarea id="nt_style_profile" class="text_pole textarea_compact" rows="5" placeholder="轻小说口吻、称谓策略、专名规则等">${escapeHtml(project.styleProfile)}</textarea>
+              </label>
+              <button id="nt_save_project" class="menu_button">保存项目</button>
+            </section>
+
+            <section class="nt-panel">
+              <h3>导入</h3>
+              <label class="nt-file-button">
+                <input id="nt_file_input" type="file" accept=".txt,.md,.epub,text/plain,application/epub+zip">
+                <span>选择 TXT / EPUB</span>
+              </label>
+              <label>粘贴文本
+                <textarea id="nt_import_text" class="text_pole textarea_compact" rows="6" placeholder="也可以直接粘贴小说文本"></textarea>
+              </label>
+              <button id="nt_import_text_btn" class="menu_button">导入粘贴文本</button>
+              <label>网页地址
+                <input id="nt_url_input" class="text_pole" type="url" placeholder="https://kakuyomu.jp/works/...">
+              </label>
+              <button id="nt_fetch_url_btn" class="menu_button">尝试读取网页</button>
+              <p class="nt-hint">${escapeHtml(hint)}</p>
+            </section>
+
+            <section class="nt-panel">
+              <h3>导出</h3>
+              <div class="novel-translator-actions">
+                <button id="nt_export_json_btn" class="menu_button">JSON</button>
+                <button id="nt_export_txt_btn" class="menu_button">TXT</button>
+                <button id="nt_export_html_btn" class="menu_button">HTML</button>
+              </div>
+              <label>导入 JSON
+                <textarea id="nt_import_json" class="text_pole textarea_compact" rows="4" placeholder="粘贴此前导出的项目 JSON"></textarea>
+              </label>
+              <button id="nt_import_json_btn" class="menu_button">读取 JSON</button>
+            </section>
+          </aside>
+
+          <section class="nt-list-column">
+            <div class="nt-section-title">
+              <h3>章节</h3>
+              <button id="nt_run_qa_btn" class="menu_button">检查</button>
+            </div>
+            <div class="novel-translator-chapters">
+              ${state.chapters.map((chapter) => {
+                const chapterItems = state.segments.filter((item) => item.chapterId === chapter.id);
+                const done = chapterItems.filter((item) => item.target.trim()).length;
+                return `
+                  <button class="novel-translator-chapter ${chapter.id === state.activeChapterId ? 'active' : ''}" data-chapter-id="${chapter.id}">
+                    <span>${escapeHtml(chapter.title)}</span>
+                    <small>${done}/${chapterItems.length}</small>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+
+            <div class="nt-section-title">
+              <h3>段落</h3>
+              <span>${activeChapter ? escapeHtml(activeChapter.title) : '未导入'}</span>
+            </div>
+            <div class="novel-translator-segments">
+              ${chapterSegments.map((segment, index) => `
+                <button class="novel-translator-segment ${segment.id === state.activeSegmentId ? 'active' : ''}" data-segment-id="${segment.id}">
+                  <span>${index + 1}. ${escapeHtml(segment.source.slice(0, 96))}</span>
+                  <small>${segment.target ? '已译' : '待译'}</small>
+                </button>
+              `).join('')}
+            </div>
+          </section>
+
+          <section class="nt-editor-column">
+            <div class="nt-section-title">
+              <h3>翻译编辑</h3>
+              <span>${activeSegment ? escapeHtml(activeSegment.status) : '未选择'}</span>
+            </div>
+            <label>原文
+              <textarea id="nt_segment_source" class="text_pole textarea_compact" rows="8" readonly>${escapeHtml(activeSegment?.source ?? '')}</textarea>
+            </label>
+            <label>译文
+              <textarea id="nt_segment_target" class="text_pole textarea_compact" rows="8" placeholder="在这里输入或粘贴译文">${escapeHtml(activeSegment?.target ?? '')}</textarea>
+            </label>
+            <label>备注
+              <textarea id="nt_segment_notes" class="text_pole textarea_compact" rows="3" placeholder="译名、风格或问题记录">${escapeHtml(activeSegment?.notes ?? '')}</textarea>
+            </label>
+            <div class="novel-translator-actions">
+              <button id="nt_save_segment_btn" class="menu_button">保存段落</button>
+              <button id="nt_prompt_btn" class="menu_button">生成翻译提示词</button>
+              <button id="nt_review_prompt_btn" class="menu_button">生成审校提示词</button>
+            </div>
+            <label>提示词
+              <textarea id="nt_prompt_output" class="text_pole textarea_compact" rows="8" placeholder="生成后可复制或发送到聊天输入框"></textarea>
+            </label>
+            <div class="novel-translator-actions">
+              <button id="nt_copy_prompt_btn" class="menu_button">复制提示词</button>
+              <button id="nt_send_prompt_btn" class="menu_button">发送到聊天</button>
+            </div>
+          </section>
+
+          <section class="nt-memory-column">
+            <div class="novel-translator-tabs">
+              <button class="menu_button nt-tab ${memoryTab === 'glossary' ? 'active' : ''}" data-tab="glossary">术语</button>
+              <button class="menu_button nt-tab ${memoryTab === 'entities' ? 'active' : ''}" data-tab="entities">人物</button>
+              <button class="menu_button nt-tab ${memoryTab === 'style' ? 'active' : ''}" data-tab="style">风格</button>
+              <button class="menu_button nt-tab ${memoryTab === 'qa' ? 'active' : ''}" data-tab="qa">检查</button>
+            </div>
+            <div id="nt_memory_panel">${renderMemoryPanel(memoryTab)}</div>
+          </section>
+        </div>
+      </section>
+    </div>
+  `;
 }
 
 function renderMemoryPanel(tab) {
@@ -188,13 +276,13 @@ function renderMemoryPanel(tab) {
       <div class="novel-translator-table">
         ${state.entities.map((item) => `
           <div class="novel-translator-memory-row">
-            <input class="text_pole nt-entity-source" data-id="${item.id}" value="${escapeHtml(item.sourceName)}" placeholder="Original name">
-            <input class="text_pole nt-entity-target" data-id="${item.id}" value="${escapeHtml(item.translatedName)}" placeholder="Translated name">
-            <input class="text_pole nt-entity-role" data-id="${item.id}" value="${escapeHtml(item.role)}" placeholder="Role">
+            <input class="text_pole nt-entity-source" data-id="${item.id}" value="${escapeHtml(item.sourceName)}" placeholder="原名">
+            <input class="text_pole nt-entity-target" data-id="${item.id}" value="${escapeHtml(item.translatedName)}" placeholder="译名">
+            <input class="text_pole nt-entity-role" data-id="${item.id}" value="${escapeHtml(item.role)}" placeholder="身份">
           </div>
         `).join('')}
       </div>
-      <button id="nt_add_entity_btn" class="menu_button wide100p">Add name</button>
+      <button id="nt_add_entity_btn" class="menu_button wide100p">添加人物</button>
     `;
   }
 
@@ -202,13 +290,13 @@ function renderMemoryPanel(tab) {
     return `
       <div class="novel-translator-table">
         ${state.styleRules.map((item) => `
-          <div class="novel-translator-memory-row">
-            <input class="text_pole nt-style-rule" data-id="${item.id}" value="${escapeHtml(item.rule)}" placeholder="Style rule">
-            <input class="text_pole nt-style-example" data-id="${item.id}" value="${escapeHtml(item.examples)}" placeholder="Examples">
+          <div class="novel-translator-memory-row two">
+            <input class="text_pole nt-style-rule" data-id="${item.id}" value="${escapeHtml(item.rule)}" placeholder="风格规则">
+            <input class="text_pole nt-style-example" data-id="${item.id}" value="${escapeHtml(item.examples)}" placeholder="例句">
           </div>
         `).join('')}
       </div>
-      <button id="nt_add_style_btn" class="menu_button wide100p">Add style rule</button>
+      <button id="nt_add_style_btn" class="menu_button wide100p">添加风格规则</button>
     `;
   }
 
@@ -221,7 +309,7 @@ function renderMemoryPanel(tab) {
             <span>${escapeHtml(issue.message)}</span>
             <small>${escapeHtml(issue.segmentId)}</small>
           </div>
-        `).join('') : '<div class="novel-translator-empty">No QA issues yet.</div>'}
+        `).join('') : '<div class="novel-translator-empty">还没有检查结果。</div>'}
       </div>
     `;
   }
@@ -230,50 +318,65 @@ function renderMemoryPanel(tab) {
     <div class="novel-translator-table">
       ${state.glossary.map((item) => `
         <div class="novel-translator-memory-row">
-          <input class="text_pole nt-glossary-source" data-id="${item.id}" value="${escapeHtml(item.sourceTerm)}" placeholder="Source term">
-          <input class="text_pole nt-glossary-target" data-id="${item.id}" value="${escapeHtml(item.targetTerm)}" placeholder="Target term">
-          <input class="text_pole nt-glossary-type" data-id="${item.id}" value="${escapeHtml(item.type)}" placeholder="Type">
+          <input class="text_pole nt-glossary-source" data-id="${item.id}" value="${escapeHtml(item.sourceTerm)}" placeholder="原词">
+          <input class="text_pole nt-glossary-target" data-id="${item.id}" value="${escapeHtml(item.targetTerm)}" placeholder="译名">
+          <input class="text_pole nt-glossary-type" data-id="${item.id}" value="${escapeHtml(item.type)}" placeholder="类型">
         </div>
       `).join('')}
     </div>
-    <button id="nt_add_glossary_btn" class="menu_button wide100p">Add glossary term</button>
+    <button id="nt_add_glossary_btn" class="menu_button wide100p">添加术语</button>
   `;
 }
 
 function bindEvents() {
-  root.querySelector('#nt_save_project')?.addEventListener('click', () => {
-    dispatch({
-      type: 'updateProject',
-      patch: {
-        title: getTextAreaValue('nt_project_title') || 'Untitled novel',
-        sourceLang: getTextAreaValue('nt_source_lang') || 'Chinese',
-        targetLang: getTextAreaValue('nt_target_lang') || 'English',
-        styleProfile: getTextAreaValue('nt_style_profile'),
-      },
-    });
+  root.querySelector('#nt_open_workspace_btn')?.addEventListener('click', () => {
+    workspaceOpen = true;
+    render();
+  });
+
+  root.querySelector('#nt_close_workspace_btn')?.addEventListener('click', () => {
+    workspaceOpen = false;
+    render();
+  });
+
+  root.querySelector('#nt_save_project')?.addEventListener('click', () => saveProject());
+
+  root.querySelector('#nt_file_input')?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      await importFile(file);
+    }
   });
 
   root.querySelector('#nt_import_text_btn')?.addEventListener('click', () => {
-    const text = getTextAreaValue('nt_import_text');
+    const text = value('nt_import_text');
     if (!text) {
       return;
     }
-    const parsed = splitNovelText(text);
-    dispatch({ type: 'replaceNovelContent', chapters: parsed.chapters, segments: parsed.segments });
+    replaceNovelContent(text, state.project.title);
+    hint = '文本已导入。';
+    render();
   });
 
-  root.querySelector('#nt_export_json_btn')?.addEventListener('click', async () => {
-    const json = exportState(state);
-    await navigator.clipboard?.writeText(json);
-    setTextAreaValue('nt_import_json', json);
+  root.querySelector('#nt_fetch_url_btn')?.addEventListener('click', importFromUrl);
+
+  root.querySelector('#nt_export_json_btn')?.addEventListener('click', () => {
+    download(`${safeName(state.project.title)}.json`, exportState(state), 'application/json;charset=utf-8');
+  });
+
+  root.querySelector('#nt_export_txt_btn')?.addEventListener('click', () => {
+    download(`${safeName(state.project.title)}.txt`, buildTxtExport(), 'text/plain;charset=utf-8');
+  });
+
+  root.querySelector('#nt_export_html_btn')?.addEventListener('click', () => {
+    download(`${safeName(state.project.title)}.html`, buildHtmlExport(), 'text/html;charset=utf-8');
   });
 
   root.querySelector('#nt_import_json_btn')?.addEventListener('click', () => {
-    const json = getTextAreaValue('nt_import_json');
-    if (!json) {
-      return;
+    const json = value('nt_import_json');
+    if (json) {
+      dispatch({ type: 'replaceState', state: importState(json) });
     }
-    dispatch({ type: 'replaceState', state: importState(json) });
   });
 
   root.querySelectorAll('.novel-translator-chapter').forEach((button) => {
@@ -284,49 +387,35 @@ function bindEvents() {
     button.addEventListener('click', () => dispatch({ type: 'setActiveSegment', segmentId: button.dataset.segmentId }));
   });
 
-  root.querySelector('#nt_save_segment_btn')?.addEventListener('click', () => {
-    const segment = selectActiveSegment(state);
-    if (!segment) {
-      return;
-    }
-    dispatch({
-      type: 'updateSegment',
-      segmentId: segment.id,
-      patch: {
-        target: getTextAreaValue('nt_segment_target'),
-        notes: getTextAreaValue('nt_segment_notes'),
-        status: getTextAreaValue('nt_segment_target') ? 'translated' : 'draft',
-      },
-    });
-  });
-
+  root.querySelector('#nt_save_segment_btn')?.addEventListener('click', () => saveSegment());
   root.querySelector('#nt_prompt_btn')?.addEventListener('click', () => {
-    setTextAreaValue('nt_prompt_output', buildTranslationPrompt(state));
+    saveProject(false);
+    setValue('nt_prompt_output', buildTranslationPrompt(state));
   });
-
   root.querySelector('#nt_review_prompt_btn')?.addEventListener('click', () => {
-    setTextAreaValue('nt_prompt_output', buildReviewPrompt(state));
+    saveProject(false);
+    setValue('nt_prompt_output', buildReviewPrompt(state));
   });
-
   root.querySelector('#nt_copy_prompt_btn')?.addEventListener('click', async () => {
-    await navigator.clipboard?.writeText(getTextAreaValue('nt_prompt_output'));
+    await navigator.clipboard?.writeText(value('nt_prompt_output'));
   });
-
   root.querySelector('#nt_send_prompt_btn')?.addEventListener('click', () => {
-    sendPromptToChat(getTextAreaValue('nt_prompt_output'));
+    sendPromptToChat(value('nt_prompt_output'));
+  });
+  root.querySelector('#nt_send_prompt_top_btn')?.addEventListener('click', () => {
+    const prompt = value('nt_prompt_output') || buildTranslationPrompt(state);
+    sendPromptToChat(prompt);
   });
 
   root.querySelector('#nt_run_qa_btn')?.addEventListener('click', () => {
+    memoryTab = 'qa';
     dispatch({ type: 'setQaIssues', issues: runProjectQa(state) });
   });
 
   root.querySelectorAll('.nt-tab').forEach((button) => {
     button.addEventListener('click', () => {
-      root.querySelectorAll('.nt-tab').forEach((item) => item.classList.remove('active'));
-      button.classList.add('active');
-      const panel = root.querySelector('#nt_memory_panel');
-      panel.innerHTML = renderMemoryPanel(button.dataset.tab);
-      bindMemoryEvents();
+      memoryTab = button.dataset.tab;
+      render();
     });
   });
 
@@ -363,6 +452,88 @@ function bindMemoryEvents() {
   });
 }
 
+function saveProject(shouldRender = true) {
+  updateState({
+    type: 'updateProject',
+    patch: {
+      title: value('nt_project_title') || '未命名小说',
+      sourceLang: value('nt_source_lang') || '日文',
+      targetLang: value('nt_target_lang') || '中文',
+      styleProfile: value('nt_style_profile'),
+    },
+  }, shouldRender);
+}
+
+function saveSegment() {
+  const segment = selectActiveSegment(state);
+  if (!segment) {
+    return;
+  }
+  dispatch({
+    type: 'updateSegment',
+    segmentId: segment.id,
+    patch: {
+      target: value('nt_segment_target'),
+      notes: value('nt_segment_notes'),
+      status: value('nt_segment_target') ? 'translated' : 'draft',
+    },
+  });
+}
+
+async function importFile(file) {
+  try {
+    hint = `正在读取 ${file.name}...`;
+    render();
+    const lowerName = file.name.toLowerCase();
+    const text = lowerName.endsWith('.epub') ? await readEpubFile(file) : await file.text();
+    replaceNovelContent(text, file.name.replace(/\.(txt|md|epub)$/i, ''));
+    hint = `${file.name} 已导入。`;
+  } catch (error) {
+    console.error(error);
+    hint = `导入失败：${error.message}`;
+  }
+  render();
+}
+
+async function importFromUrl() {
+  const url = value('nt_url_input');
+  if (!url) {
+    hint = '请输入网页地址。';
+    render();
+    return;
+  }
+
+  hint = '正在尝试读取网页。若站点禁止跨域，后续需要接入 Server Plugin 代理。';
+  render();
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const html = await response.text();
+    replaceNovelContent(htmlToText(html), new URL(url).hostname);
+    hint = '网页已读取。若内容不完整，说明需要站点专用抓取器。';
+  } catch (error) {
+    hint = `浏览器无法直接读取：${error.message}。Kakuyomu 等站点建议下一步做 Server Plugin 代理抓取。`;
+  }
+  render();
+}
+
+function replaceNovelContent(text, title) {
+  const parsed = splitNovelText(text);
+  state = reduceState(state, {
+    type: 'updateProject',
+    patch: { title: title || state.project.title },
+  });
+  state = reduceState(state, {
+    type: 'replaceNovelContent',
+    chapters: parsed.chapters,
+    segments: parsed.segments,
+  });
+  scheduleSave();
+}
+
 function glossaryPatchFromInput(input) {
   if (input.classList.contains('nt-glossary-source')) return { sourceTerm: input.value.trim() };
   if (input.classList.contains('nt-glossary-target')) return { targetTerm: input.value.trim() };
@@ -394,6 +565,52 @@ function sendPromptToChat(prompt) {
   }
 
   context?.setChatMessage?.({ mes: prompt });
+}
+
+function buildTxtExport() {
+  return state.chapters.map((chapter) => {
+    const body = state.segments
+      .filter((segment) => segment.chapterId === chapter.id)
+      .map((segment) => segment.target || segment.source)
+      .join('\n\n');
+    return `${chapter.title}\n\n${body}`;
+  }).join('\n\n');
+}
+
+function buildHtmlExport() {
+  const chapters = state.chapters.map((chapter) => {
+    const segments = state.segments
+      .filter((segment) => segment.chapterId === chapter.id)
+      .map((segment) => `<div class="segment"><p class="source">${escapeHtml(segment.source)}</p><p class="target">${escapeHtml(segment.target)}</p></div>`)
+      .join('');
+    return `<section><h2>${escapeHtml(chapter.title)}</h2>${segments}</section>`;
+  }).join('');
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(state.project.title)}</title>
+  <style>
+    body{font-family:system-ui,sans-serif;line-height:1.8;max-width:920px;margin:40px auto;padding:0 20px}
+    .segment{border-bottom:1px solid #ddd;padding:14px 0}.source{color:#666}.target{font-size:1.08em}
+  </style>
+</head>
+<body><h1>${escapeHtml(state.project.title)}</h1>${chapters}</body>
+</html>`;
+}
+
+function download(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function safeName(name) {
+  return String(name || 'novel-translation').replace(/[\\/:*?"<>|]+/g, '_');
 }
 
 async function init() {

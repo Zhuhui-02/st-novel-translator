@@ -5,8 +5,6 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "check": "node --check index.js && node --check src/state.js && node --check src/segmenter.js && node --check src/prompt-builder.js && node --check src/qa.js && node --check src/storage.js && node --check standalone/app.js && node --check server/scraper-server.js",
-    "scraper": "node server/scraper-server.js",
-    "serve": "python3 -m http.server 8899"
+    "check": "node --check index.js && node --check src/state.js && node --check src/segmenter.js && node --check src/prompt-builder.js && node --check src/qa.js && node --check src/storage.js && node --check src/epub.js"
   }
 }

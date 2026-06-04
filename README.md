@@ -19,37 +19,31 @@ browser through `localforage` when available, with `localStorage` as a fallback.
 - Run lightweight local QA checks for empty translations, length drift, and
   terminology consistency.
 - Export and import project JSON.
-- Use the standalone Chinese workspace in `standalone/` for TXT/EPUB import and
-  JSON/TXT/HTML export.
-- Optionally run the local scraper service for URL import experiments.
+- Open an embedded Chinese translation workspace from a SillyTavern extension
+  button.
+- Import TXT and EPUB inside SillyTavern.
+- Export JSON, TXT, and bilingual HTML from the embedded workspace.
 
-## Standalone Chinese Workspace
+## Embedded Workspace
 
-Open `standalone/index.html` from a local static server or publish the repository
-through GitHub Pages. The page supports:
+After enabling the extension in SillyTavern, open Extensions and click
+`打开小说翻译工作台`. The workspace appears inside SillyTavern as a large overlay
+panel, not as a separate web app.
 
-- TXT and Markdown-like text import.
-- EPUB import through browser-side JSZip.
+The embedded workspace supports:
+
+- Project metadata and style settings.
+- TXT, Markdown-like text, and EPUB import.
 - Chapter and segment navigation.
 - Translation editing.
-- Glossary and name tables.
-- Prompt generation and local QA.
+- Glossary, name table, style rule, and QA tabs.
+- Translation/review prompt generation.
+- Sending a generated prompt to the SillyTavern chat input.
 - JSON, TXT, and bilingual HTML export.
 
-For URL import, the page first tries browser fetch. If the site blocks cross-site
-requests, run the local helper:
-
-```text
-npm run scraper
-```
-
-Then try the URL again. The helper exposes:
-
-```text
-http://localhost:8787/api/fetch?url=https%3A%2F%2Fkakuyomu.jp%2F...
-```
-
-Use site scraping carefully and only for content you have permission to process.
+URL import is included as an experimental browser-side fetch. Sites such as
+Kakuyomu usually require a future Server Plugin proxy because browsers often
+block direct cross-site reads.
 
 ## Install From SillyTavern
 
@@ -92,13 +86,13 @@ Working:
 - Translation prompt generation.
 - Review prompt generation.
 - Local QA checks.
+- EPUB import through browser-side JSZip loading.
 - JSON import and export.
 - Browser-local persistence.
 
 Not included yet:
 
 - Direct model API calls.
-- EPUB parsing.
 - SQLite/server-plugin storage.
 - Batch background translation queue.
 - DOCX/HTML export.
