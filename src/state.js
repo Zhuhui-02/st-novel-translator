@@ -1,3 +1,5 @@
+import { applyMemoryUpdates, createDefaultMemoryTables, createMemoryEntry, normalizeMemoryTables } from './memory-tables.js';
+
 const DEFAULT_PROJECT_ID = 'project_default';
 
 export function createId(prefix) {
@@ -24,6 +26,7 @@ export function createDefaultState() {
     glossary: [],
     entities: [],
     styleRules: [],
+    memoryTables: createDefaultMemoryTables(),
     qaIssues: [],
   };
 }
@@ -43,6 +46,7 @@ export function normalizeState(candidate) {
     glossary: Array.isArray(candidate.glossary) ? candidate.glossary : [],
     entities: Array.isArray(candidate.entities) ? candidate.entities : [],
     styleRules: Array.isArray(candidate.styleRules) ? candidate.styleRules : [],
+    memoryTables: normalizeMemoryTables(candidate.memoryTables),
     qaIssues: Array.isArray(candidate.qaIssues) ? candidate.qaIssues : [],
   };
 
@@ -157,6 +161,36 @@ export function reduceState(state, action) {
       return touch({
         ...state,
         styleRules: state.styleRules.map((item) => item.id === action.id ? { ...item, ...action.patch } : item),
+      });
+
+    case 'addMemoryEntry':
+      return touch({
+        ...state,
+        memoryTables: {
+          ...state.memoryTables,
+          [action.table]: [...(state.memoryTables[action.table] ?? []), createMemoryEntry(action.table)],
+        },
+      });
+
+    case 'updateMemoryEntry':
+      return touch({
+        ...state,
+        memoryTables: {
+          ...state.memoryTables,
+          [action.table]: (state.memoryTables[action.table] ?? []).map((item) => (
+            item.id === action.id ? { ...item, ...action.patch, updatedAt: new Date().toISOString() } : item
+          )),
+        },
+      });
+
+    case 'applyMemoryUpdates':
+      return touch({
+        ...state,
+        memoryTables: applyMemoryUpdates(state.memoryTables, action.payload, {
+          chapterId: action.chapterId,
+          segmentId: action.segmentId,
+          evidence: action.evidence,
+        }),
       });
 
     case 'setQaIssues':

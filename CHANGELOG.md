@@ -11,3 +11,5 @@
 - Replaced the standalone page experiment with an embedded SillyTavern workspace
   opened from a plugin button.
 - Added TXT/EPUB import and JSON/TXT/HTML export in the embedded workspace.
+- Added six structured continuity memory tables and an API JSON application flow
+  for translation plus memory updates.

@@ -1,4 +1,5 @@
 import { selectActiveChapter, selectActiveSegment } from './state.js';
+import { buildMemoryUpdateInstructions, formatMemoryContext } from './memory-tables.js';
 
 export function buildTranslationPrompt(state) {
   const segment = selectActiveSegment(state);
@@ -11,6 +12,7 @@ export function buildTranslationPrompt(state) {
   const glossary = selectMatchingGlossary(state, segment.source);
   const entities = selectMatchingEntities(state, segment.source);
   const styleRules = state.styleRules.filter((item) => item.rule).sort(byPriority).slice(0, 12);
+  const memoryContext = formatMemoryContext(state.memoryTables);
 
   return [
     `You are a professional literary translator translating a novel from ${state.project.sourceLang} to ${state.project.targetLang}.`,
@@ -26,10 +28,11 @@ export function buildTranslationPrompt(state) {
     listSection('Style rules', styleRules.map((item) => formatStyleRule(item))),
     listSection('Name table', entities.map((item) => `${item.sourceName} => ${item.translatedName}${item.role ? ` (${item.role})` : ''}`)),
     listSection('Glossary', glossary.map((item) => `${item.sourceTerm} => ${item.targetTerm}${item.type ? ` [${item.type}]` : ''}`)),
+    section('Structured continuity memory', memoryContext),
     section('Nearby context', context),
     section('Source passage', segment.source),
     '',
-    `Return only the ${state.project.targetLang} translation.`,
+    buildMemoryUpdateInstructions(),
   ].filter(Boolean).join('\n');
 }
 

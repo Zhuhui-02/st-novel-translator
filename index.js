@@ -6,6 +6,7 @@ import { buildReviewPrompt, buildTranslationPrompt } from './src/prompt-builder.
 import { runProjectQa } from './src/qa.js';
 import { loadState, saveState } from './src/storage.js';
 import { htmlToText, readEpubFile } from './src/epub.js';
+import { MEMORY_TABLES, getMemoryTable } from './src/memory-tables.js';
 
 const EXTENSION_NAME = 'st-novel-translator';
 const SETTINGS_KEY = 'novelTranslator';
@@ -16,6 +17,7 @@ let root = null;
 let saveTimer = null;
 let workspaceOpen = false;
 let memoryTab = 'glossary';
+let activeMemoryTable = 'spatiotemporal';
 let hint = '选择 TXT / EPUB，或粘贴网页地址尝试读取。';
 
 function ensureSettings() {
@@ -252,6 +254,7 @@ function renderWorkspace() {
             <div class="novel-translator-actions">
               <button id="nt_copy_prompt_btn" class="menu_button">复制提示词</button>
               <button id="nt_send_prompt_btn" class="menu_button">发送到聊天</button>
+              <button id="nt_apply_api_json_btn" class="menu_button">应用 API JSON</button>
             </div>
           </section>
 
@@ -260,6 +263,7 @@ function renderWorkspace() {
               <button class="menu_button nt-tab ${memoryTab === 'glossary' ? 'active' : ''}" data-tab="glossary">术语</button>
               <button class="menu_button nt-tab ${memoryTab === 'entities' ? 'active' : ''}" data-tab="entities">人物</button>
               <button class="menu_button nt-tab ${memoryTab === 'style' ? 'active' : ''}" data-tab="style">风格</button>
+              <button class="menu_button nt-tab ${memoryTab === 'memory' ? 'active' : ''}" data-tab="memory">记忆表</button>
               <button class="menu_button nt-tab ${memoryTab === 'qa' ? 'active' : ''}" data-tab="qa">检查</button>
             </div>
             <div id="nt_memory_panel">${renderMemoryPanel(memoryTab)}</div>
@@ -271,6 +275,37 @@ function renderWorkspace() {
 }
 
 function renderMemoryPanel(tab) {
+  if (tab === 'memory') {
+    const table = getMemoryTable(activeMemoryTable);
+    const rows = state.memoryTables?.[table.key] ?? [];
+    return `
+      <div class="nt-memory-switcher">
+        ${MEMORY_TABLES.map((item) => `
+          <button class="menu_button nt-memory-table-btn ${item.key === table.key ? 'active' : ''}" data-memory-table="${item.key}">
+            ${escapeHtml(item.title)}
+          </button>
+        `).join('')}
+      </div>
+      <div class="nt-memory-head">
+        <span>${escapeHtml(table.subjectLabel)}</span>
+        <span>${escapeHtml(table.detailLabel)}</span>
+        <span>${escapeHtml(table.statusLabel)}</span>
+        <span>证据</span>
+      </div>
+      <div class="novel-translator-table">
+        ${rows.map((item) => `
+          <div class="novel-translator-memory-row four">
+            <input class="text_pole nt-memory-subject" data-table="${table.key}" data-id="${item.id}" value="${escapeHtml(item.subject)}" placeholder="${escapeHtml(table.subjectLabel)}">
+            <input class="text_pole nt-memory-detail" data-table="${table.key}" data-id="${item.id}" value="${escapeHtml(item.detail)}" placeholder="${escapeHtml(table.detailLabel)}">
+            <input class="text_pole nt-memory-status" data-table="${table.key}" data-id="${item.id}" value="${escapeHtml(item.status)}" placeholder="${escapeHtml(table.statusLabel)}">
+            <input class="text_pole nt-memory-evidence" data-table="${table.key}" data-id="${item.id}" value="${escapeHtml(item.evidence)}" placeholder="来源证据">
+          </div>
+        `).join('')}
+      </div>
+      <button id="nt_add_memory_btn" class="menu_button wide100p">添加${escapeHtml(table.title)}记录</button>
+    `;
+  }
+
   if (tab === 'entities') {
     return `
       <div class="novel-translator-table">
@@ -402,6 +437,7 @@ function bindEvents() {
   root.querySelector('#nt_send_prompt_btn')?.addEventListener('click', () => {
     sendPromptToChat(value('nt_prompt_output'));
   });
+  root.querySelector('#nt_apply_api_json_btn')?.addEventListener('click', () => applyApiJson());
   root.querySelector('#nt_send_prompt_top_btn')?.addEventListener('click', () => {
     const prompt = value('nt_prompt_output') || buildTranslationPrompt(state);
     sendPromptToChat(prompt);
@@ -426,6 +462,14 @@ function bindMemoryEvents() {
   root.querySelector('#nt_add_glossary_btn')?.addEventListener('click', () => dispatch({ type: 'addGlossaryEntry' }));
   root.querySelector('#nt_add_entity_btn')?.addEventListener('click', () => dispatch({ type: 'addEntity' }));
   root.querySelector('#nt_add_style_btn')?.addEventListener('click', () => dispatch({ type: 'addStyleRule' }));
+  root.querySelector('#nt_add_memory_btn')?.addEventListener('click', () => dispatch({ type: 'addMemoryEntry', table: activeMemoryTable }));
+
+  root.querySelectorAll('.nt-memory-table-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      activeMemoryTable = button.dataset.memoryTable;
+      render();
+    });
+  });
 
   root.querySelectorAll('.nt-glossary-source, .nt-glossary-target, .nt-glossary-type').forEach((input) => {
     input.addEventListener('change', () => dispatch({
@@ -448,6 +492,15 @@ function bindMemoryEvents() {
       type: 'updateStyleRule',
       id: input.dataset.id,
       patch: stylePatchFromInput(input),
+    }));
+  });
+
+  root.querySelectorAll('.nt-memory-subject, .nt-memory-detail, .nt-memory-status, .nt-memory-evidence').forEach((input) => {
+    input.addEventListener('change', () => dispatch({
+      type: 'updateMemoryEntry',
+      table: input.dataset.table,
+      id: input.dataset.id,
+      patch: memoryPatchFromInput(input),
     }));
   });
 }
@@ -549,6 +602,71 @@ function entityPatchFromInput(input) {
 function stylePatchFromInput(input) {
   if (input.classList.contains('nt-style-rule')) return { rule: input.value.trim() };
   return { examples: input.value.trim() };
+}
+
+function memoryPatchFromInput(input) {
+  if (input.classList.contains('nt-memory-subject')) return { subject: input.value.trim() };
+  if (input.classList.contains('nt-memory-detail')) return { detail: input.value.trim() };
+  if (input.classList.contains('nt-memory-status')) return { status: input.value.trim() };
+  return { evidence: input.value.trim() };
+}
+
+function applyApiJson() {
+  const payload = parseApiJson(value('nt_prompt_output'));
+  const segment = selectActiveSegment(state);
+  if (!payload || !segment) {
+    hint = '无法应用：请在提示词文本框中粘贴 API 返回的 JSON，并选择一个段落。';
+    render();
+    return;
+  }
+
+  const translation = payload.translation ?? payload.translated_text ?? payload.target ?? '';
+  if (translation) {
+    state = reduceState(state, {
+      type: 'updateSegment',
+      segmentId: segment.id,
+      patch: {
+        target: String(translation).trim(),
+        status: 'translated',
+      },
+    });
+  }
+
+  state = reduceState(state, {
+    type: 'applyMemoryUpdates',
+    payload,
+    chapterId: segment.chapterId,
+    segmentId: segment.id,
+    evidence: segment.source.slice(0, 160),
+  });
+  memoryTab = 'memory';
+  hint = '已应用 API JSON：译文与结构化记忆表已更新。';
+  scheduleSave();
+  render();
+}
+
+function parseApiJson(raw) {
+  if (!raw) {
+    return null;
+  }
+
+  const trimmed = raw.trim()
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/i, '')
+    .trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return null;
+    }
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
 }
 
 function sendPromptToChat(prompt) {

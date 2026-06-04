@@ -38,12 +38,44 @@ The embedded workspace supports:
 - Translation editing.
 - Glossary, name table, style rule, and QA tabs.
 - Translation/review prompt generation.
+- API JSON workflow that applies `translation` and structured
+  `memory_updates` back into the project.
 - Sending a generated prompt to the SillyTavern chat input.
 - JSON, TXT, and bilingual HTML export.
+- Six continuity memory tables:
+  - spatiotemporal table
+  - character traits table
+  - protagonist relationship table
+  - tasks/orders/agreements table
+  - important event history table
+  - important items table
 
 URL import is included as an experimental browser-side fetch. Sites such as
 Kakuyomu usually require a future Server Plugin proxy because browsers often
 block direct cross-site reads.
+
+## Translation Memory Protocol
+
+When you click `生成翻译提示词`, the prompt asks the model/API to return strict
+JSON:
+
+```json
+{
+  "translation": "",
+  "memory_updates": {
+    "spatiotemporal": [],
+    "characterTraits": [],
+    "protagonistRelations": [],
+    "tasksAgreements": [],
+    "eventHistory": [],
+    "importantItems": []
+  }
+}
+```
+
+Paste that API result into the prompt box and click `应用 API JSON`. The extension
+will save the translation to the selected segment and merge the memory updates
+into the structured tables.
 
 ## Install From SillyTavern
 
@@ -87,6 +119,7 @@ Working:
 - Review prompt generation.
 - Local QA checks.
 - EPUB import through browser-side JSZip loading.
+- Structured continuity memory tables and API JSON application.
 - JSON import and export.
 - Browser-local persistence.
 
